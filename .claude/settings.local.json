@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npx shadcn@latest init:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss init:*)",
+      "Bash(./node_modules/.bin/tailwindcss:*)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(grep:*)",
+      "Read(C:\\Users\\caleb\\code/**)",
+      "WebFetch(domain:wiseoldman.net)",
+      "WebSearch",
+      "WebFetch(domain:oldschool.runescape.wiki)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.hazelmere.xyz)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(rm:*)",
+      "Read(//c/Users/caleb/GolandProjects/hazelmere-api/**)",
+      "WebFetch(domain:profiler.firefox.com)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
