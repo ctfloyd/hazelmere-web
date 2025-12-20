@@ -84,7 +84,7 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
   }, [userId, timeRange?.startTime?.getTime(), timeRange?.endTime?.getTime(), timeRangeExceedsLimit]);
 
   // Process snapshots to calculate experience gains
-  const { cells, monthLabels, rowCount } = useMemo(() => {
+  const { cells, monthLabels } = useMemo(() => {
     if (snapshots.length < 2) {
       return { cells: [], monthLabels: [], rowCount: 7 };
     }

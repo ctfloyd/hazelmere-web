@@ -165,8 +165,8 @@ export function useYearlySnapshotData(userId: string | null): UseApiResult<Hisco
       const startDate = new Date();
       startDate.setFullYear(startDate.getFullYear() - 1);
       
-      const snapshots = await apiClient.getSnapshotInterval(userId, startDate, endDate);
-      setState({ data: snapshots, loading: false, error: null });
+      const response = await apiClient.getSnapshotInterval(userId, startDate, endDate);
+      setState({ data: response.snapshots, loading: false, error: null });
     } catch (error) {
       setState({ data: null, loading: false, error: error as ApiError });
     }
