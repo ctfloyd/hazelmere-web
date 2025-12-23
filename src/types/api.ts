@@ -320,3 +320,96 @@ export const ACTIVITY_ACTIVITY_TYPES: ActivityType[] = [
   "COLLECTIONS_LOGGED"
 ];
 
+// Delta types - represent changes between snapshots
+export interface SkillDelta {
+  activityType: ActivityType;
+  name: string;
+  experienceGain: number;
+  levelGain: number;
+}
+
+export interface BossDelta {
+  activityType: ActivityType;
+  name: string;
+  killCountGain: number;
+}
+
+export interface ActivityDelta {
+  activityType: ActivityType;
+  name: string;
+  scoreGain: number;
+}
+
+export interface HiscoreDelta {
+  id: string;
+  userId: string;
+  snapshotId: string;
+  previousSnapshotId: string;
+  timestamp: string; // ISO string
+  skills?: SkillDelta[];
+  bosses?: BossDelta[];
+  activities?: ActivityDelta[];
+}
+
+export interface GetLatestDeltaResponse {
+  delta: HiscoreDelta;
+}
+
+export interface GetDeltaIntervalRequest {
+  userId: string;
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+}
+
+export interface GetDeltaIntervalResponse {
+  deltas: HiscoreDelta[];
+  totalDeltas: number;
+}
+
+export interface GetDeltaSummaryRequest {
+  userId: string;
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+}
+
+export interface SkillDeltaSummary {
+  activityType: ActivityType;
+  name: string;
+  totalExperienceGain: number;
+  totalLevelGain: number;
+}
+
+export interface BossDeltaSummary {
+  activityType: ActivityType;
+  name: string;
+  totalKillCountGain: number;
+}
+
+export interface ActivityDeltaSummary {
+  activityType: ActivityType;
+  name: string;
+  totalScoreGain: number;
+}
+
+export interface GetDeltaSummaryResponse {
+  userId: string;
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+  totalExperienceGain: number;
+  skills: SkillDeltaSummary[];
+  bosses: BossDeltaSummary[];
+  activities: ActivityDeltaSummary[];
+  deltaCount: number;
+}
+
+export interface GetSnapshotWithDeltasRequest {
+  userId: string;
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+}
+
+export interface GetSnapshotWithDeltasResponse {
+  snapshot: HiscoreSnapshot;
+  deltas: HiscoreDelta[];
+}
+

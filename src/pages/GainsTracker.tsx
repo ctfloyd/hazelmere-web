@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,14 @@ import { DailyHeatmap } from '@/components/charts/DailyHeatmap';
 import { GainsChart } from '@/components/charts/GainsChart';
 import { ErrorAlert } from '@/components/ui/ErrorAlert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSnapshotInterval, useApiHealth } from '@/hooks/useApi';
+import { useSnapshotWithDeltas, useApiHealth } from '@/hooks/useApi';
 import type { ActivityType } from '@/types/api';
-import { formatNumber, formatActivityTypeName } from '@/lib/dataUtils';
+import {
+  formatNumber,
+  formatActivityTypeName,
+  calculateGainsFromDeltas,
+  getActivityGainFromDeltas
+} from '@/lib/dataUtils';
 import { AlertCircle, CheckCircle2, BarChart3, TrendingUp } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
@@ -70,72 +75,28 @@ export function GainsTracker() {
     updateSearchParams();
   }, [updateSearchParams]);
 
-  const { data: snapshots, loading, error, refetch, aggregationWindow, totalSnapshots, snapshotsWithGains } = useSnapshotInterval(
+  const { data: deltaResponse, loading, error, refetch, totalDeltas } = useSnapshotWithDeltas(
     userId,
     timeRange.startTime,
     timeRange.endTime
   );
   const { isHealthy, checking } = useApiHealth();
 
-  // Sort snapshots chronologically for proper first/last calculation
-  const sortedSnapshots = snapshots ? [...snapshots].sort((a, b) => 
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  ) : null;
-  
-  const firstSnapshot = sortedSnapshots && sortedSnapshots.length > 0 ? sortedSnapshots[0] : null;
-  const latestSnapshot = sortedSnapshots && sortedSnapshots.length > 0 ? sortedSnapshots[sortedSnapshots.length - 1] : null;
-
-  // Calculate gains for selected activity or total XP
-  const calculateGains = () => {
-    if (!sortedSnapshots || sortedSnapshots.length < 2 || !latestSnapshot || !firstSnapshot) {
+  // Calculate gains directly from deltas
+  const { totalGain, levelGain } = useMemo(() => {
+    if (!deltaResponse?.deltas || deltaResponse.deltas.length === 0) {
       return { totalGain: 0, levelGain: 0 };
     }
 
     if (!selectedActivity) {
-      // Calculate total XP gain
-      const latestTotalXp = latestSnapshot.skills
-        .filter(skill => skill.activityType !== 'OVERALL')
-        .reduce((sum, skill) => sum + skill.experience, 0);
-      const firstTotalXp = firstSnapshot.skills
-        .filter(skill => skill.activityType !== 'OVERALL')
-        .reduce((sum, skill) => sum + skill.experience, 0);
-      
-      return { totalGain: latestTotalXp - firstTotalXp, levelGain: 0 };
+      // Get total XP gain from OVERALL skill in deltas
+      const gainsSummary = calculateGainsFromDeltas(deltaResponse.deltas);
+      return { totalGain: gainsSummary.totalExperienceGain, levelGain: 0 };
     }
 
-    // Calculate gains for specific activity
-    const latestActivity = [
-      ...latestSnapshot.skills,
-      ...latestSnapshot.bosses,
-      ...latestSnapshot.activities
-    ].find(item => item.activityType === selectedActivity);
-
-    const firstActivity = [
-      ...firstSnapshot.skills,
-      ...firstSnapshot.bosses,
-      ...firstSnapshot.activities
-    ].find(item => item.activityType === selectedActivity);
-
-    if (!latestActivity || !firstActivity) {
-      return { totalGain: 0, levelGain: 0 };
-    }
-
-    let totalGain = 0;
-    let levelGain = 0;
-
-    if ('experience' in latestActivity && 'experience' in firstActivity) {
-      totalGain = latestActivity.experience - firstActivity.experience;
-      levelGain = latestActivity.level - firstActivity.level;
-    } else if ('killCount' in latestActivity && 'killCount' in firstActivity) {
-      totalGain = latestActivity.killCount - firstActivity.killCount;
-    } else if ('score' in latestActivity && 'score' in firstActivity) {
-      totalGain = latestActivity.score - firstActivity.score;
-    }
-
-    return { totalGain, levelGain };
-  };
-
-  const { totalGain, levelGain } = calculateGains();
+    // Get gains for specific activity
+    return getActivityGainFromDeltas(deltaResponse.deltas, selectedActivity);
+  }, [deltaResponse, selectedActivity]);
 
   // Handle time range selection from chart drag
   const handleChartTimeRangeSelect = useCallback((startTime: Date, endTime: Date) => {
@@ -231,7 +192,7 @@ export function GainsTracker() {
       </div>
 
       {/* Summary Stats */}
-      {snapshots && snapshots.length > 0 && (
+      {deltaResponse && totalDeltas > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -275,18 +236,18 @@ export function GainsTracker() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Snapshots</CardTitle>
+              <CardTitle className="text-sm font-medium">Changes Tracked</CardTitle>
             </CardHeader>
             <CardContent>
               {loading ? (
                 <Skeleton className="h-8 w-20" />
               ) : (
                 <div className="text-2xl font-bold">
-                  {snapshotsWithGains}
+                  {totalDeltas}
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                of {totalSnapshots} snapshots had gains
+                snapshots with gains
               </p>
             </CardContent>
           </Card>
@@ -308,7 +269,7 @@ export function GainsTracker() {
       )}
 
       {/* Charts and Heatmap */}
-      {sortedSnapshots && sortedSnapshots.length > 0 && (
+      {deltaResponse && totalDeltas > 0 && (
         <div className="grid gap-6 lg:grid-cols-1">
           <Card>
             <CardHeader>
@@ -321,10 +282,9 @@ export function GainsTracker() {
                 </div>
               ) : (
                 <GainsChart
-                  snapshots={sortedSnapshots}
+                  deltaResponse={deltaResponse}
                   selectedActivity={selectedActivity}
                   chartType={chartType}
-                  aggregationWindow={aggregationWindow}
                   onTimeRangeSelect={handleChartTimeRangeSelect}
                 />
               )}
@@ -345,13 +305,13 @@ export function GainsTracker() {
         </div>
       )}
 
-      {userId && !loading && (!snapshots || snapshots.length === 0) && (
+      {userId && !loading && (!deltaResponse || totalDeltas === 0) && (
         <Card>
           <CardContent className="p-8 text-center">
             <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">No data found</h3>
             <p className="text-muted-foreground mb-4">
-              No snapshots were found for the selected time period.
+              No progress data was found for the selected time period.
               Try selecting a different time range or ensure snapshots exist for this user.
             </p>
             <Button onClick={refetch} variant="outline">

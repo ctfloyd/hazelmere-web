@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, type ApiError } from '@/lib/api';
-import type { HiscoreSnapshot, User, AggregationWindow } from '@/types/api';
+import type { HiscoreSnapshot, User, AggregationWindow, GetSnapshotWithDeltasResponse } from '@/types/api';
 
 // Determine aggregation window based on date range
 // < 1 year: daily, 1-2 years: weekly, > 2 years: monthly
@@ -228,4 +228,50 @@ export function useApiHealth() {
   }, [checkHealth]);
 
   return { isHealthy, checking, checkHealth };
+}
+
+interface SnapshotWithDeltasResult {
+  data: GetSnapshotWithDeltasResponse | null;
+  loading: boolean;
+  error: ApiError | Error | null;
+  refetch: () => Promise<void>;
+  totalDeltas: number;
+}
+
+export function useSnapshotWithDeltas(
+  userId: string | null,
+  startTime: Date | null,
+  endTime: Date | null
+): SnapshotWithDeltasResult {
+  const [state, setState] = useState<UseApiState<GetSnapshotWithDeltasResponse>>({
+    data: null,
+    loading: false,
+    error: null,
+  });
+  const [totalDeltas, setTotalDeltas] = useState(0);
+
+  const fetchData = useCallback(async () => {
+    if (!userId || !startTime || !endTime) {
+      setState({ data: null, loading: false, error: null });
+      setTotalDeltas(0);
+      return;
+    }
+
+    setState(prev => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const response = await apiClient.getSnapshotWithDeltas(userId, startTime, endTime);
+      setState({ data: response, loading: false, error: null });
+      setTotalDeltas(response.deltas?.length || 0);
+    } catch (error) {
+      setState({ data: null, loading: false, error: error as ApiError });
+      setTotalDeltas(0);
+    }
+  }, [userId, startTime, endTime]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { ...state, refetch: fetchData, totalDeltas };
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import type { HiscoreSnapshot } from '@/types/api';
+import type { HiscoreDelta } from '@/types/api';
 import { apiClient } from '@/lib/api';
 import { WebGLHeatmap } from './WebGLHeatmap';
 
@@ -34,7 +34,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [snapshots, setSnapshots] = useState<HiscoreSnapshot[]>([]);
+  const [deltas, setDeltas] = useState<HiscoreDelta[]>([]);
   const [containerSize, setContainerSize] = useState({ width: 900, height: 150 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -45,11 +45,11 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
     return daysDiff > 365;
   }, [timeRange?.startTime?.getTime(), timeRange?.endTime?.getTime()]);
 
-  // Fetch snapshot data for the time range
+  // Fetch delta data for the time range
   useEffect(() => {
     async function fetchData() {
       if (!userId || timeRangeExceedsLimit) {
-        setSnapshots([]);
+        setDeltas([]);
         return;
       }
 
@@ -65,16 +65,11 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
           return d;
         })();
 
-        // Get one extra day before start for comparison
-        const fetchStartDate = new Date(startDate);
-        fetchStartDate.setDate(fetchStartDate.getDate() - 1);
-
-        // Always use 'daily' aggregation for heatmap
-        const response = await apiClient.getSnapshotInterval(userId, fetchStartDate, endDate, 'daily');
-        setSnapshots(response.snapshots);
+        const response = await apiClient.getSnapshotWithDeltas(userId, startDate, endDate);
+        setDeltas(response.deltas || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
-        setSnapshots([]);
+        setDeltas([]);
       } finally {
         setLoading(false);
       }
@@ -83,71 +78,47 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
     fetchData();
   }, [userId, timeRange?.startTime?.getTime(), timeRange?.endTime?.getTime(), timeRangeExceedsLimit]);
 
-  // Process snapshots to calculate experience gains
+  // Process deltas to build heatmap cells
   const { cells, monthLabels } = useMemo(() => {
-    if (snapshots.length < 2) {
-      return { cells: [], monthLabels: [], rowCount: 7 };
+    if (deltas.length === 0) {
+      return { cells: [], monthLabels: [] };
     }
 
-    // Sort snapshots by timestamp
-    const sorted = [...snapshots].sort((a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    // Calculate daily gains from OVERALL skill and skill breakdowns
+    // Aggregate deltas by date
     const dailyGains = new Map<string, number>();
     const dailySkillGains = new Map<string, Map<string, number>>();
 
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = sorted[i - 1];
-      const curr = sorted[i];
-
-      const prevOverall = prev.skills.find(s => s.activityType === 'OVERALL');
-      const currOverall = curr.skills.find(s => s.activityType === 'OVERALL');
-
-      if (!prevOverall || !currOverall) continue;
-
-      const expGain = currOverall.experience - prevOverall.experience;
-
-      // Skip negative gains (shouldn't happen but just in case)
-      if (expGain < 0) continue;
-
-      // Skip if gain exceeds 10 million (likely data error)
-      if (expGain > 10_000_000) continue;
-
-      const date = new Date(curr.timestamp);
+    for (const delta of deltas) {
+      const date = new Date(delta.timestamp);
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-      // Calculate individual skill gains for breakdown
-      const skillGainsForSnapshot = new Map<string, number>();
-      curr.skills.forEach(currSkill => {
-        if (currSkill.activityType === 'OVERALL') return;
+      // Get overall experience gain from OVERALL skill
+      const overallGain = delta.skills?.find(s => s.activityType === 'OVERALL')?.experienceGain || 0;
 
-        const prevSkill = prev.skills.find(s => s.activityType === currSkill.activityType);
-        if (prevSkill) {
-          const skillGain = currSkill.experience - prevSkill.experience;
-          if (skillGain > 0 && skillGain <= 10_000_000) {
-            skillGainsForSnapshot.set(currSkill.name, skillGain);
-          }
-        }
-      });
+      // Skip if gain exceeds 10 million (likely data error)
+      if (overallGain > 10_000_000) continue;
 
-      // Accumulate skill gains for the day
-      if (!dailySkillGains.has(dateKey)) {
-        dailySkillGains.set(dateKey, new Map<string, number>());
-      }
-      const daySkillGains = dailySkillGains.get(dateKey)!;
-      skillGainsForSnapshot.forEach((gain, skill) => {
-        daySkillGains.set(skill, (daySkillGains.get(skill) || 0) + gain);
-      });
-
-      // Accumulate overall gains for the same day, but cap total daily gain at 10M
+      // Accumulate overall gains for the day
       const currentDayGain = dailyGains.get(dateKey) || 0;
-      const newTotal = currentDayGain + expGain;
+      const newTotal = currentDayGain + overallGain;
 
-      // Only set if the total for the day doesn't exceed 10M
       if (newTotal <= 10_000_000) {
         dailyGains.set(dateKey, newTotal);
+      }
+
+      // Accumulate skill gains for breakdown
+      if (delta.skills) {
+        if (!dailySkillGains.has(dateKey)) {
+          dailySkillGains.set(dateKey, new Map<string, number>());
+        }
+        const daySkillGains = dailySkillGains.get(dateKey)!;
+
+        for (const skill of delta.skills) {
+          if (skill.activityType === 'OVERALL') continue;
+          if (skill.experienceGain <= 0 || skill.experienceGain > 10_000_000) continue;
+
+          daySkillGains.set(skill.name, (daySkillGains.get(skill.name) || 0) + skill.experienceGain);
+        }
       }
     }
 
@@ -163,7 +134,6 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
     })();
     startDate.setHours(0, 0, 0, 0);
 
-    // Daily aggregation - generate 7-row grid layout
     // Find the Sunday at or before the start date
     const startSunday = new Date(startDate);
     startSunday.setDate(startSunday.getDate() - startSunday.getDay());
@@ -189,14 +159,13 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
       let skillBreakdown: SkillGain[] | undefined;
       if (dailySkillGains.has(dateKey)) {
         const daySkills = dailySkillGains.get(dateKey)!;
-        // Convert to array and sort by experience, take top 5
         skillBreakdown = Array.from(daySkills.entries())
           .map(([skill, exp]) => ({ skill, experience: exp }))
           .sort((a, b) => b.experience - a.experience)
           .slice(0, 5);
       }
 
-      // Track month labels - record the week index where each month appears
+      // Track month labels
       const monthYear = `${MONTHS[currentDate.getMonth()]} '${String(currentDate.getFullYear()).slice(-2)}`;
       if (!monthLabelMap.has(monthYear) && currentDate.getDate() <= 7) {
         monthLabelMap.set(monthYear, weekIndex);
@@ -212,18 +181,17 @@ export function DailyHeatmap({ userId, timeRange }: DailyHeatmapProps) {
         dateString: dateKey,
         skillBreakdown
       });
-      
+
       currentDate.setDate(currentDate.getDate() + 1);
     }
-    
-    // Convert month labels to array
+
     const labels = Array.from(monthLabelMap.entries()).map(([label, week]) => ({
       label,
       weekIndex: week
     }));
-    
+
     return { cells: cellsArray, monthLabels: labels };
-  }, [snapshots, timeRange?.startTime?.getTime(), timeRange?.endTime?.getTime()]);
+  }, [deltas, timeRange?.startTime?.getTime(), timeRange?.endTime?.getTime()]);
 
   // Track container size
   useEffect(() => {

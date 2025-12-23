@@ -1,15 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import type { HiscoreSnapshot, ActivityType, AggregationWindow } from '@/types/api';
+import type { ActivityType, HiscoreDelta, GetSnapshotWithDeltasResponse, HiscoreSnapshot } from '@/types/api';
 import { BOSS_ACTIVITY_TYPES } from '@/types/api';
 import { formatActivityTypeName } from '@/lib/dataUtils';
 import { WebGLBarChart } from '@/components/charts/WebGLBarChart';
 import { WebGLLineChart } from '@/components/charts/WebGLLineChart';
 
 interface GainsChartProps {
-  snapshots: HiscoreSnapshot[];
+  deltaResponse: GetSnapshotWithDeltasResponse;
   selectedActivity?: ActivityType | null;
   chartType?: 'cumulative' | 'daily';
-  aggregationWindow?: AggregationWindow | null;
   onTimeRangeSelect?: (startTime: Date, endTime: Date) => void;
 }
 
@@ -29,11 +28,10 @@ interface ChartDataPoint {
 
 function extractActivityData(snapshot: HiscoreSnapshot, activityType?: ActivityType | null) {
   if (!activityType) {
-    // Total XP from all skills
+    // Total XP: use OVERALL skill (matches what deltas use)
+    const overall = snapshot.skills.find(s => s.activityType === 'OVERALL');
     return {
-      value: snapshot.skills
-        .filter(skill => skill.activityType !== 'OVERALL')
-        .reduce((sum, skill) => sum + skill.experience, 0),
+      value: overall?.experience || 0,
       level: undefined
     };
   }
@@ -61,53 +59,77 @@ function extractActivityData(snapshot: HiscoreSnapshot, activityType?: ActivityT
   return { value: 0, level: undefined };
 }
 
-function generateChartData(snapshots: HiscoreSnapshot[], activityType?: ActivityType | null): ChartDataPoint[] {
-  if (snapshots.length === 0) return [];
+// Generate chart data directly from deltas
+// The snapshot is the STARTING point, and deltas are added to show progression
+function generateChartDataFromDeltas(
+  deltaResponse: GetSnapshotWithDeltasResponse,
+  activityType?: ActivityType | null
+): ChartDataPoint[] {
+  const { snapshot: baseSnapshot, deltas } = deltaResponse;
 
-  const sortedSnapshots = [...snapshots].sort((a, b) => 
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  if (!baseSnapshot) return [];
+
+  // Get the starting value from the snapshot (this is the baseline)
+  const { value: startingValue, level: startingLevel } = extractActivityData(baseSnapshot, activityType);
+
+  // If no deltas, just return the snapshot as a single point
+  if (deltas.length === 0) {
+    const snapshotDate = new Date(baseSnapshot.timestamp);
+    return [{
+      date: snapshotDate.toLocaleDateString(),
+      timestamp: snapshotDate.getTime(),
+      cumulativeValue: startingValue,
+      dailyGain: 0,
+      level: startingLevel
+    }];
+  }
+
+  // Sort deltas chronologically
+  const sortedDeltas = [...deltas].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
   const data: ChartDataPoint[] = [];
-  let previousValue = 0;
-  let previousSnapshot: HiscoreSnapshot | null = null;
 
-  sortedSnapshots.forEach((snapshot, index) => {
-    const { value, level } = extractActivityData(snapshot, activityType);
-    const date = new Date(snapshot.timestamp);
-    
-    const dailyGain = index === 0 ? 0 : value - previousValue;
-    
-    // Calculate skill breakdown for Overall activity
+  // Add initial data point from the snapshot (starting point)
+  const snapshotDate = new Date(baseSnapshot.timestamp);
+  data.push({
+    date: snapshotDate.toLocaleDateString(),
+    timestamp: snapshotDate.getTime(),
+    cumulativeValue: startingValue,
+    dailyGain: 0,
+    level: startingLevel
+  });
+
+  // Process each delta - add gains to cumulative value
+  let cumulativeValue = startingValue;
+
+  for (const delta of sortedDeltas) {
+    const dailyGain = getDeltaGainForActivity(delta, activityType);
+    cumulativeValue += dailyGain;
+
+    const date = new Date(delta.timestamp);
+
+    // Calculate skill breakdown from delta
     let skillBreakdown: SkillGain[] | undefined;
-    if ((!activityType || activityType === 'OVERALL') && previousSnapshot && dailyGain > 0) {
-      const skillGains: SkillGain[] = [];
-      
-      snapshot.skills.forEach(currSkill => {
-        if (currSkill.activityType === 'OVERALL') return;
-        
-        const prevSkill = previousSnapshot!.skills.find(s => s.activityType === currSkill.activityType);
-        if (prevSkill) {
-          const skillGain = currSkill.experience - prevSkill.experience;
-          if (skillGain > 0 && skillGain <= 10_000_000) {
-            skillGains.push({
-              skill: currSkill.name,
-              experience: skillGain
-            });
-          }
-        }
-      });
-      
-      // Sort by experience and take top 5
-      skillBreakdown = skillGains
+    if ((!activityType || activityType === 'OVERALL') && delta.skills && dailyGain > 0) {
+      const skillGains: SkillGain[] = delta.skills
+        .filter(s => s.activityType !== 'OVERALL' && s.experienceGain > 0 && s.experienceGain <= 10_000_000)
+        .map(s => ({
+          skill: s.name,
+          experience: s.experienceGain
+        }))
         .sort((a, b) => b.experience - a.experience)
         .slice(0, 5);
+
+      if (skillGains.length > 0) {
+        skillBreakdown = skillGains;
+      }
     }
-    
-    // Filter out daily gains exceeding 10 million XP (likely data errors)
+
+    // Apply filtering logic for display
     let displayDailyGain = 0;
     if (dailyGain > 0) {
-      // Only apply 10M cap for experience-based activities (not bosses or score-based activities)
       const isBossActivity = activityType && BOSS_ACTIVITY_TYPES.includes(activityType);
       const isScoreActivity = activityType && ['LEAGUE_POINTS', 'DEADMAN_POINTS', 'BOUNTY_HUNTER__HUNTER', 'BOUNTY_HUNTER__ROGUE',
           'BOUNTY_HUNTER_LEGACY__HUNTER', 'BOUNTY_HUNTER_LEGACY__ROGUE', 'CLUE_SCROLLS_ALL',
@@ -117,29 +139,47 @@ function generateChartData(snapshots: HiscoreSnapshot[], activityType?: Activity
       const isExperience = !activityType || (!isBossActivity && !isScoreActivity);
 
       if (isExperience && dailyGain > 10_000_000) {
-        // Skip this data point for daily gains as it's likely an error
         displayDailyGain = 0;
       } else {
-        // For daily gains, filter out very small gains that are likely noise
         const minimumGain = isBossActivity ? 1 : 100;
         displayDailyGain = dailyGain >= minimumGain ? dailyGain : 0;
       }
     }
-    
+
     data.push({
       date: date.toLocaleDateString(),
       timestamp: date.getTime(),
-      cumulativeValue: value,
+      cumulativeValue,
       dailyGain: displayDailyGain,
-      level,
+      level: undefined,
       skillBreakdown
     });
-
-    previousValue = value;
-    previousSnapshot = snapshot;
-  });
+  }
 
   return data;
+}
+
+// Get the gain value from a delta for a specific activity type
+function getDeltaGainForActivity(delta: HiscoreDelta, activityType?: ActivityType | null): number {
+  if (!activityType) {
+    // Total XP: use OVERALL skill
+    const overall = delta.skills?.find(s => s.activityType === 'OVERALL');
+    return overall?.experienceGain || 0;
+  }
+
+  // Check skills
+  const skill = delta.skills?.find(s => s.activityType === activityType);
+  if (skill) return skill.experienceGain;
+
+  // Check bosses
+  const boss = delta.bosses?.find(b => b.activityType === activityType);
+  if (boss) return boss.killCountGain;
+
+  // Check activities
+  const activity = delta.activities?.find(a => a.activityType === activityType);
+  if (activity) return activity.scoreGain;
+
+  return 0;
 }
 
 // Check if an activity type uses small values (kill counts, scores) vs large XP values
@@ -275,21 +315,21 @@ function getValueLabel(activityType?: ActivityType | null): string {
   return `${activityName} XP`;
 }
 
-export function GainsChart({ snapshots, selectedActivity, chartType = 'cumulative', aggregationWindow, onTimeRangeSelect }: GainsChartProps) {
+export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumulative', onTimeRangeSelect }: GainsChartProps) {
   const [customCeiling, setCustomCeiling] = useState<number | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 320 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Data is already aggregated by the server based on aggregationWindow
+  // Generate chart data directly from deltas
   const chartData = useMemo(() => {
-    return generateChartData(snapshots, selectedActivity);
-  }, [snapshots, selectedActivity]);
+    return generateChartDataFromDeltas(deltaResponse, selectedActivity);
+  }, [deltaResponse, selectedActivity]);
 
   // Generate overall XP data for anomaly detection (used even when specific activity is selected)
   const overallChartData = useMemo(() => {
     if (!selectedActivity) return chartData;
-    return generateChartData(snapshots, null);
-  }, [snapshots, selectedActivity, chartData]);
+    return generateChartDataFromDeltas(deltaResponse, null);
+  }, [deltaResponse, selectedActivity, chartData]);
 
   // Detect anomalies based on overall XP data
   const anomalyTimestamps = useMemo(
@@ -376,23 +416,14 @@ export function GainsChart({ snapshots, selectedActivity, chartType = 'cumulativ
     );
   }
 
-  // Get label for the aggregation window
-  const aggregationLabel = aggregationWindow === 'monthly' ? 'Monthly' :
-    aggregationWindow === 'weekly' ? 'Weekly' : 'Daily';
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">
-          {chartType === 'cumulative' ? 'Progress Over Time' : `${aggregationLabel} Gains`}
+          {chartType === 'cumulative' ? 'Progress Over Time' : 'Daily Gains'}
           {selectedActivity && (
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               ({formatActivityTypeName(selectedActivity)})
-            </span>
-          )}
-          {aggregationWindow && aggregationWindow !== 'daily' && (
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              (aggregated {aggregationWindow})
             </span>
           )}
         </h3>

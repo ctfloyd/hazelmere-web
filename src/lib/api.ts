@@ -8,8 +8,14 @@ import type {
   GetSnapshotIntervalResponse,
   GetAllUsersResponse,
   User,
-  AggregationWindow
+  AggregationWindow,
+  HiscoreDelta,
+  GetLatestDeltaResponse,
+  GetDeltaIntervalResponse,
+  GetDeltaSummaryResponse,
+  GetSnapshotWithDeltasResponse
 } from '@/types/api';
+import { decodeBinaryDeltaResponse } from './binaryProtocol';
 
 // Always use the public API URL
 const API_BASE_URL = 'https://api.hazelmere.xyz';
@@ -223,6 +229,126 @@ export class HazelmereApiClient {
     } catch (error) {
       console.error('Health check failed:', error);
       return false;
+    }
+  }
+
+  async getLatestDelta(userId: string): Promise<HiscoreDelta> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/delta/${userId}/latest`, {
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      const data = await this.handleResponse<GetLatestDeltaResponse>(response);
+      return data.delta;
+    } catch (error) {
+      console.error('Failed to fetch latest delta:', userId, error);
+      throw error;
+    }
+  }
+
+  async getDeltaInterval(
+    userId: string,
+    startTime: Date,
+    endTime: Date
+  ): Promise<GetDeltaIntervalResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/delta/interval`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString()
+        })
+      });
+
+      const data = await this.handleResponse<GetDeltaIntervalResponse>(response);
+      return {
+        deltas: data.deltas || [],
+        totalDeltas: data.totalDeltas || 0
+      };
+    } catch (error) {
+      console.error('Failed to fetch delta interval:', { userId, startTime, endTime }, error);
+      throw error;
+    }
+  }
+
+  async getDeltaSummary(
+    userId: string,
+    startTime: Date,
+    endTime: Date
+  ): Promise<GetDeltaSummaryResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/delta/summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString()
+        })
+      });
+
+      return await this.handleResponse<GetDeltaSummaryResponse>(response);
+    } catch (error) {
+      console.error('Failed to fetch delta summary:', { userId, startTime, endTime }, error);
+      throw error;
+    }
+  }
+
+  async getSnapshotWithDeltas(
+    userId: string,
+    startTime: Date,
+    endTime: Date
+  ): Promise<GetSnapshotWithDeltasResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/summary/delta`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/x-hazelmere-binary',
+        },
+        body: JSON.stringify({
+          userId,
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        let message = `HTTP ${response.status}: ${response.statusText}`;
+
+        try {
+          const errorJson = JSON.parse(errorBody);
+          if (errorJson.message) {
+            message = errorJson.message;
+          }
+        } catch {
+          if (errorBody) {
+            message = errorBody;
+          }
+        }
+
+        const error: ApiError = {
+          message,
+          status: response.status,
+        };
+        throw error;
+      }
+
+      const buffer = await response.arrayBuffer();
+      return decodeBinaryDeltaResponse(buffer, userId);
+    } catch (error) {
+      console.error('Failed to fetch snapshot with deltas:', { userId, startTime, endTime }, error);
+      throw error;
     }
   }
 }

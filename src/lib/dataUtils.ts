@@ -1,8 +1,9 @@
-import type { 
-  HiscoreSnapshot, 
-  SkillSnapshot, 
-  BossSnapshot, 
-  ActivityType
+import type {
+  HiscoreSnapshot,
+  SkillSnapshot,
+  BossSnapshot,
+  ActivityType,
+  HiscoreDelta
 } from '@/types/api';
 
 export interface SkillDataPoint {
@@ -189,4 +190,109 @@ export function getSkillByType(snapshot: HiscoreSnapshot, activityType: Activity
 // Get boss by activity type
 export function getBossByType(snapshot: HiscoreSnapshot, activityType: ActivityType): BossSnapshot | null {
   return snapshot.bosses.find(boss => boss.activityType === activityType) || null;
+}
+
+// Calculate total gains from deltas
+export interface DeltaGainsSummary {
+  totalExperienceGain: number;
+  skillGains: Map<ActivityType, { experienceGain: number; levelGain: number; name: string }>;
+  bossGains: Map<ActivityType, { killCountGain: number; name: string }>;
+  activityGains: Map<ActivityType, { scoreGain: number; name: string }>;
+}
+
+export function calculateGainsFromDeltas(deltas: HiscoreDelta[]): DeltaGainsSummary {
+  const skillGains = new Map<ActivityType, { experienceGain: number; levelGain: number; name: string }>();
+  const bossGains = new Map<ActivityType, { killCountGain: number; name: string }>();
+  const activityGains = new Map<ActivityType, { scoreGain: number; name: string }>();
+  let totalExperienceGain = 0;
+
+  for (const delta of deltas) {
+    // Process skill deltas
+    if (delta.skills) {
+      for (const skill of delta.skills) {
+        // Use OVERALL skill for total experience gain
+        if (skill.activityType === 'OVERALL') {
+          totalExperienceGain += skill.experienceGain;
+        }
+
+        const existing = skillGains.get(skill.activityType);
+        if (existing) {
+          existing.experienceGain += skill.experienceGain;
+          existing.levelGain += skill.levelGain;
+        } else {
+          skillGains.set(skill.activityType, {
+            experienceGain: skill.experienceGain,
+            levelGain: skill.levelGain,
+            name: skill.name
+          });
+        }
+      }
+    }
+
+    // Process boss deltas
+    if (delta.bosses) {
+      for (const boss of delta.bosses) {
+        const existing = bossGains.get(boss.activityType);
+        if (existing) {
+          existing.killCountGain += boss.killCountGain;
+        } else {
+          bossGains.set(boss.activityType, {
+            killCountGain: boss.killCountGain,
+            name: boss.name
+          });
+        }
+      }
+    }
+
+    // Process activity deltas
+    if (delta.activities) {
+      for (const activity of delta.activities) {
+        const existing = activityGains.get(activity.activityType);
+        if (existing) {
+          existing.scoreGain += activity.scoreGain;
+        } else {
+          activityGains.set(activity.activityType, {
+            scoreGain: activity.scoreGain,
+            name: activity.name
+          });
+        }
+      }
+    }
+  }
+
+  return { totalExperienceGain, skillGains, bossGains, activityGains };
+}
+
+// Get gains for a specific activity from deltas
+export function getActivityGainFromDeltas(
+  deltas: HiscoreDelta[],
+  activityType: ActivityType
+): { totalGain: number; levelGain: number } {
+  let totalGain = 0;
+  let levelGain = 0;
+
+  for (const delta of deltas) {
+    // Check skills
+    const skillDelta = delta.skills?.find(s => s.activityType === activityType);
+    if (skillDelta) {
+      totalGain += skillDelta.experienceGain;
+      levelGain += skillDelta.levelGain;
+      continue;
+    }
+
+    // Check bosses
+    const bossDelta = delta.bosses?.find(b => b.activityType === activityType);
+    if (bossDelta) {
+      totalGain += bossDelta.killCountGain;
+      continue;
+    }
+
+    // Check activities
+    const activityDelta = delta.activities?.find(a => a.activityType === activityType);
+    if (activityDelta) {
+      totalGain += activityDelta.scoreGain;
+    }
+  }
+
+  return { totalGain, levelGain };
 }
