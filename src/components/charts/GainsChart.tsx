@@ -317,7 +317,10 @@ function getValueLabel(activityType?: ActivityType | null): string {
 
 export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumulative', onTimeRangeSelect }: GainsChartProps) {
   const [customCeiling, setCustomCeiling] = useState<number | null>(null);
-  const [containerSize, setContainerSize] = useState({ width: 800, height: 320 });
+  const [containerSize, setContainerSize] = useState({
+    width: typeof window !== 'undefined' ? Math.min(800, window.innerWidth - 32) : 800,
+    height: 320
+  });
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Generate chart data directly from deltas
@@ -364,7 +367,12 @@ export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumul
 
     const updateSize = () => {
       const rect = container.getBoundingClientRect();
-      setContainerSize({ width: rect.width, height: rect.height });
+      // Cap width to viewport to prevent overflow
+      const maxWidth = typeof window !== 'undefined' ? window.innerWidth - 32 : rect.width;
+      setContainerSize({
+        width: Math.min(rect.width, maxWidth),
+        height: rect.height
+      });
     };
 
     updateSize();
@@ -432,6 +440,7 @@ export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumul
       <div
         ref={containerRef}
         className="h-64 sm:h-80 relative overflow-hidden w-full"
+        style={{ maxWidth: 'calc(100vw - 2rem)' }}
       >
         {chartType === 'cumulative' ? (
           /* WebGL-accelerated line chart for cumulative progress */

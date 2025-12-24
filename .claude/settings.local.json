@@ -22,7 +22,8 @@
       "Bash(npm run build:*)",
       "Bash(rm:*)",
       "Read(//c/Users/caleb/GolandProjects/hazelmere-api/**)",
-      "WebFetch(domain:profiler.firefox.com)"
+      "WebFetch(domain:profiler.firefox.com)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

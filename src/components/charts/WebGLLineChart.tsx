@@ -275,6 +275,12 @@ export function WebGLLineChart({
   const lastTouchRef = useRef<{ x: number; distance: number; timestamp: number } | null>(null);
   const isPinchingRef = useRef(false);
 
+  // Long-press detection refs for Robinhood-style touch
+  const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isLongPressActiveRef = useRef(false);
+  const isPanningRef = useRef(false);
+
   // Responsive margins - smaller on mobile
   const margins = useMemo(() => {
     const isMobile = width < 500;
@@ -677,14 +683,25 @@ export function WebGLLineChart({
     }
   }, [data, width, margins, timeRange]);
 
-  // Touch support for mobile - single finger moves indicator, two fingers for pinch zoom and pan
+  // Helper to clear long-press timeout
+  const clearLongPressTimeout = useCallback(() => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Touch support for mobile - Robinhood-style: single finger pan, long press for tooltip, pinch to zoom
   const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
 
     if (e.touches.length === 2) {
-      // Two-finger gesture start (pinch or pan)
+      // Two-finger: pinch zoom only
+      clearLongPressTimeout();
       isPinchingRef.current = true;
+      isPanningRef.current = false;
+      isLongPressActiveRef.current = false;
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       const distance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
@@ -693,17 +710,25 @@ export function WebGLLineChart({
       setHoveredPoint(null);
       setHoverLineX(null);
     } else if (e.touches.length === 1) {
-      // Single touch - moves the vertical indicator
+      // Single touch: wait to determine intent (pan vs long-press for tooltip)
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
-      lastTouchRef.current = { x: touch.clientX - rect.left, distance: 0, timestamp: Date.now() };
-      updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
+      touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+      lastTouchRef.current = { x: touch.clientX, distance: 0, timestamp: Date.now() };
+      isPanningRef.current = false;
+      isLongPressActiveRef.current = false;
+
+      // Start long-press timer (400ms)
+      longPressTimeoutRef.current = setTimeout(() => {
+        isLongPressActiveRef.current = true;
+        updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
+      }, 400);
     }
-  }, [data, width, margins, timeRange, updateIndicatorFromTouch]);
+  }, [data, clearLongPressTimeout, updateIndicatorFromTouch]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || data.length === 0 || !lastTouchRef.current) return;
+    if (!canvas || data.length === 0) return;
 
     const chartWidth = width - margins.left - margins.right;
     const currentRange = viewRange
@@ -712,7 +737,7 @@ export function WebGLLineChart({
     const timeSpan = currentRange.max - currentRange.min;
 
     if (e.touches.length === 2 && isPinchingRef.current) {
-      // Two-finger gesture: pinch to zoom + pan
+      // Pinch zoom ONLY (no pan with two fingers)
       e.preventDefault();
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -722,21 +747,17 @@ export function WebGLLineChart({
       const relativeCenterX = centerX - rect.left - margins.left;
       const centerRatio = Math.max(0, Math.min(1, relativeCenterX / chartWidth));
 
-      // Calculate zoom
-      const scale = lastTouchRef.current.distance / newDistance;
+      // Calculate zoom only (no pan)
+      const scale = lastTouchRef.current!.distance / newDistance;
       const newTimeSpan = Math.max(
-        24 * 60 * 60 * 1000, // Min 1 day
+        24 * 60 * 60 * 1000,
         Math.min(fullTimeRange.max - fullTimeRange.min, timeSpan * scale)
       );
 
-      // Calculate pan
-      const deltaX = lastTouchRef.current.x - centerX;
-      const deltaTime = (deltaX / chartWidth) * timeSpan;
-
       // Apply zoom centered on pinch point
       const centerTimestamp = currentRange.min + centerRatio * timeSpan;
-      let newStart = centerTimestamp - centerRatio * newTimeSpan + deltaTime;
-      let newEnd = centerTimestamp + (1 - centerRatio) * newTimeSpan + deltaTime;
+      let newStart = centerTimestamp - centerRatio * newTimeSpan;
+      let newEnd = centerTimestamp + (1 - centerRatio) * newTimeSpan;
 
       // Clamp to full range
       if (newStart < fullTimeRange.min) {
@@ -752,23 +773,63 @@ export function WebGLLineChart({
       lastTouchRef.current = { x: centerX, distance: newDistance, timestamp: Date.now() };
       setHoveredPoint(null);
       setHoverLineX(null);
-    } else if (e.touches.length === 1 && !isPinchingRef.current) {
-      // Single finger: move the indicator (don't prevent default to allow scrolling)
+    } else if (e.touches.length === 1) {
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
-      updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
-      lastTouchRef.current = { x: touch.clientX - rect.left, distance: 0, timestamp: Date.now() };
+
+      if (isLongPressActiveRef.current) {
+        // Long press active: move tooltip
+        updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
+      } else if (isPanningRef.current) {
+        // Already panning: update viewRange
+        e.preventDefault();
+        const deltaX = lastTouchRef.current!.x - touch.clientX;
+        const deltaTime = (deltaX / chartWidth) * timeSpan;
+
+        let newStart = currentRange.min + deltaTime;
+        let newEnd = currentRange.max + deltaTime;
+
+        // Clamp to full range
+        if (newStart < fullTimeRange.min) {
+          newStart = fullTimeRange.min;
+          newEnd = newStart + timeSpan;
+        }
+        if (newEnd > fullTimeRange.max) {
+          newEnd = fullTimeRange.max;
+          newStart = newEnd - timeSpan;
+        }
+
+        setViewRange({ start: newStart, end: newEnd });
+        lastTouchRef.current = { x: touch.clientX, distance: 0, timestamp: Date.now() };
+      } else if (touchStartPosRef.current) {
+        // Check if moved enough to start panning
+        const dx = touch.clientX - touchStartPosRef.current.x;
+        if (Math.abs(dx) > 10) {
+          // Cancel long-press, start panning
+          clearLongPressTimeout();
+          isPanningRef.current = true;
+          e.preventDefault();
+          lastTouchRef.current = { x: touch.clientX, distance: 0, timestamp: Date.now() };
+        }
+      }
     }
-  }, [data, width, margins, viewRange, fullTimeRange, updateIndicatorFromTouch]);
+  }, [data, width, margins, viewRange, fullTimeRange, clearLongPressTimeout, updateIndicatorFromTouch]);
 
   const handleTouchEnd = useCallback(() => {
+    clearLongPressTimeout();
     isPinchingRef.current = false;
-    // Keep tooltip visible for a moment on touch end
-    setTimeout(() => {
-      setHoveredPoint(null);
-      setHoverLineX(null);
-    }, 2000);
-  }, []);
+    isPanningRef.current = false;
+    touchStartPosRef.current = null;
+
+    if (isLongPressActiveRef.current) {
+      // Keep tooltip visible briefly after long-press ends
+      setTimeout(() => {
+        setHoveredPoint(null);
+        setHoverLineX(null);
+      }, 2000);
+    }
+    isLongPressActiveRef.current = false;
+  }, [clearLongPressTimeout]);
 
   const handleCanvasMouseLeave = useCallback(() => {
     setHoveredPoint(null);
@@ -938,7 +999,7 @@ export function WebGLLineChart({
             width,
             height,
             cursor: onTimeRangeSelect ? 'crosshair' : 'default',
-            touchAction: 'pan-y'
+            touchAction: 'none'
           }}
           onMouseMove={handleCanvasMouseMove}
           onMouseLeave={handleCanvasMouseLeave}
