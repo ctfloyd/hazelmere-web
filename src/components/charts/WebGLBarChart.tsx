@@ -162,16 +162,18 @@ export function WebGLBarChart({
   const lastTouchRef = useRef<{ x: number; distance: number; timestamp: number } | null>(null);
   const isPinchingRef = useRef(false);
 
+  // Check if mobile
+  const isMobile = width < 500;
+
   // Responsive margins - smaller on mobile
   const margins = useMemo(() => {
-    const isMobile = width < 500;
     return {
       left: isMobile ? 45 : 70,
       right: isMobile ? 10 : 30,
       top: isMobile ? 15 : 20,
       bottom: isMobile ? 30 : 40
     };
-  }, [width]);
+  }, [isMobile]);
 
   // Calculate Y-axis ticks - always whole numbers
   const yAxisTicks = useMemo(() => {
@@ -641,8 +643,7 @@ export function WebGLBarChart({
       setHoveredBar(null);
       setHoverLineX(null);
     } else if (e.touches.length === 1 && !isPinchingRef.current) {
-      // Single finger: move the indicator
-      e.preventDefault();
+      // Single finger: move the indicator (don't prevent default to allow scrolling)
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
       updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
@@ -686,35 +687,37 @@ export function WebGLBarChart({
   }, [height, margins, yAxisMax]);
 
   return (
-    <div className="relative" style={{ width, height }}>
-      {/* Y-axis drag zone - subtle, only shows indicator on hover */}
-      <div
-        className="absolute cursor-ns-resize group"
-        style={{
-          left: 0,
-          top: margins.top,
-          width: margins.left,
-          height: height - margins.top - margins.bottom,
-          zIndex: 20
-        }}
-        onMouseDown={handleYAxisMouseDown}
-      >
-        {/* Subtle hover indicator on the right edge */}
+    <div className="relative w-full" style={{ maxWidth: width, height }}>
+      {/* Y-axis drag zone - subtle, only shows indicator on hover (hidden on mobile) */}
+      {!isMobile && (
         <div
-          className="absolute right-0 top-0 bottom-0 w-1 bg-transparent group-hover:bg-muted-foreground/20 transition-colors"
-        />
-        {/* Drag hint - only visible on hover */}
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="flex flex-col items-center text-muted-foreground/60">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-            </svg>
-            <svg className="w-3 h-3 -mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+          className="absolute cursor-ns-resize group"
+          style={{
+            left: 0,
+            top: margins.top,
+            width: margins.left,
+            height: height - margins.top - margins.bottom,
+            zIndex: 20
+          }}
+          onMouseDown={handleYAxisMouseDown}
+        >
+          {/* Subtle hover indicator on the right edge */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1 bg-transparent group-hover:bg-muted-foreground/20 transition-colors"
+          />
+          {/* Drag hint - only visible on hover */}
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex flex-col items-center text-muted-foreground/60">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+              <svg className="w-3 h-3 -mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Y-axis labels */}
       <div className="absolute pointer-events-none" style={{ left: 0, top: 0, width: margins.left - 5 }}>
@@ -776,8 +779,8 @@ export function WebGLBarChart({
         ref={canvasRef}
         width={width * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
         height={height * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
-        className="absolute inset-0 touch-none"
-        style={{ width, height, cursor: onTimeRangeSelect ? 'crosshair' : 'default' }}
+        className="absolute inset-0"
+        style={{ width: '100%', height: '100%', maxWidth: width, cursor: onTimeRangeSelect ? 'crosshair' : 'default', touchAction: 'pan-y pinch-zoom' }}
         onMouseMove={handleCanvasMouseMove}
         onMouseLeave={handleCanvasMouseLeave}
         onMouseDown={handleRangeMouseDown}

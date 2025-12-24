@@ -753,8 +753,7 @@ export function WebGLLineChart({
       setHoveredPoint(null);
       setHoverLineX(null);
     } else if (e.touches.length === 1 && !isPinchingRef.current) {
-      // Single finger: move the indicator
-      e.preventDefault();
+      // Single finger: move the indicator (don't prevent default to allow scrolling)
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
       updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
@@ -862,7 +861,7 @@ export function WebGLLineChart({
   }
 
   return (
-    <div className="relative" style={{ width, height }}>
+    <div className="relative w-full" style={{ maxWidth: width, height }}>
       {/* Y-axis labels */}
       <div className="absolute pointer-events-none" style={{ left: 0, top: 0, width: margins.left - 5 }}>
         {yAxisTicks.map((tick, i) => (
@@ -923,8 +922,8 @@ export function WebGLLineChart({
         ref={canvasRef}
         width={width * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
         height={height * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
-        className="absolute inset-0 touch-none"
-        style={{ width, height, cursor: onTimeRangeSelect ? 'crosshair' : 'default' }}
+        className="absolute inset-0"
+        style={{ width: '100%', height: '100%', maxWidth: width, cursor: onTimeRangeSelect ? 'crosshair' : 'default', touchAction: 'pan-y pinch-zoom' }}
         onMouseMove={handleCanvasMouseMove}
         onMouseLeave={handleCanvasMouseLeave}
         onMouseDown={handleMouseDown}
