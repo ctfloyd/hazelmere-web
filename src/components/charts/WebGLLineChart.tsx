@@ -861,7 +861,7 @@ export function WebGLLineChart({
   }
 
   return (
-    <div className="relative w-full h-full" style={{ height }}>
+    <div className="relative w-full h-full overflow-hidden" style={{ height }}>
       {/* Y-axis labels */}
       <div className="absolute pointer-events-none" style={{ left: 0, top: 0, width: margins.left - 5 }}>
         {yAxisTicks.map((tick, i) => (
@@ -880,7 +880,7 @@ export function WebGLLineChart({
       </div>
 
       {/* X-axis labels */}
-      <div className="absolute pointer-events-none" style={{ left: margins.left, bottom: 0, right: margins.right, height: margins.bottom }}>
+      <div className="absolute pointer-events-none overflow-hidden" style={{ left: margins.left, bottom: 0, right: margins.right, height: margins.bottom }}>
         {xAxisTicks.map((tick, i) => (
           <div
             key={i}

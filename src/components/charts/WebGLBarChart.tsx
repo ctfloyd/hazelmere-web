@@ -687,7 +687,7 @@ export function WebGLBarChart({
   }, [height, margins, yAxisMax]);
 
   return (
-    <div className="relative w-full h-full" style={{ height }}>
+    <div className="relative w-full h-full overflow-hidden" style={{ height }}>
       {/* Y-axis drag zone - subtle, only shows indicator on hover (hidden on mobile) */}
       {!isMobile && (
         <div
@@ -737,7 +737,7 @@ export function WebGLBarChart({
       </div>
 
       {/* X-axis labels */}
-      <div className="absolute pointer-events-none" style={{ left: margins.left, bottom: 0, right: margins.right, height: margins.bottom }}>
+      <div className="absolute pointer-events-none overflow-hidden" style={{ left: margins.left, bottom: 0, right: margins.right, height: margins.bottom }}>
         {xAxisTicks.map((tick, i) => (
           <div
             key={i}
