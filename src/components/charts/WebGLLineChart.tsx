@@ -270,12 +270,21 @@ export function WebGLLineChart({
   const [dragStartX, setDragStartX] = useState<number | null>(null);
   const [dragEndX, setDragEndX] = useState<number | null>(null);
 
-  const margins = useMemo(() => ({
-    left: 70,
-    right: 30,
-    top: 20,
-    bottom: 40
-  }), []);
+  // Mobile gesture state
+  const [viewRange, setViewRange] = useState<{ start: number; end: number } | null>(null);
+  const lastTouchRef = useRef<{ x: number; distance: number; timestamp: number } | null>(null);
+  const isPinchingRef = useRef(false);
+
+  // Responsive margins - smaller on mobile
+  const margins = useMemo(() => {
+    const isMobile = width < 500;
+    return {
+      left: isMobile ? 45 : 70,
+      right: isMobile ? 10 : 30,
+      top: isMobile ? 15 : 20,
+      bottom: isMobile ? 30 : 40
+    };
+  }, [width]);
 
   // Calculate Y-axis domain with padding
   const yAxisDomain = useMemo(() => {
@@ -291,13 +300,26 @@ export function WebGLLineChart({
     };
   }, [data]);
 
-  // Calculate time range
-  const timeRange = useMemo(() => {
+  // Calculate full time range from data
+  const fullTimeRange = useMemo(() => {
     if (data.length === 0) return { min: 0, max: 1 };
     return {
       min: data[0].timestamp,
       max: data[data.length - 1].timestamp
     };
+  }, [data]);
+
+  // Effective time range (respects viewRange if set for zoom/pan)
+  const timeRange = useMemo(() => {
+    if (viewRange) {
+      return { min: viewRange.start, max: viewRange.end };
+    }
+    return fullTimeRange;
+  }, [viewRange, fullTimeRange]);
+
+  // Reset view range when data changes
+  useEffect(() => {
+    setViewRange(null);
   }, [data]);
 
   // Calculate Y-axis ticks
@@ -624,6 +646,131 @@ export function WebGLLineChart({
     }
   }, [data, width, margins, timeRange, isDragging]);
 
+  // Helper to update indicator position from touch
+  const updateIndicatorFromTouch = useCallback((clientX: number, clientY: number, rect: DOMRect) => {
+    const x = clientX - rect.left;
+    setMousePos({ x: clientX, y: clientY });
+
+    const chartWidth = width - margins.left - margins.right;
+    const relativeX = x - margins.left;
+
+    if (relativeX >= 0 && relativeX <= chartWidth && data.length > 0) {
+      const normalizedX = relativeX / chartWidth;
+      const hoverTimestamp = timeRange.min + normalizedX * (timeRange.max - timeRange.min);
+
+      let closestIndex = 0;
+      let closestDistance = Math.abs(data[0].timestamp - hoverTimestamp);
+
+      for (let i = 1; i < data.length; i++) {
+        const distance = Math.abs(data[i].timestamp - hoverTimestamp);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = i;
+        }
+      }
+
+      const pointTimestamp = data[closestIndex].timestamp;
+      const pointX = margins.left + ((pointTimestamp - timeRange.min) / (timeRange.max - timeRange.min)) * chartWidth;
+
+      setHoveredPoint(closestIndex);
+      setHoverLineX(pointX);
+    }
+  }, [data, width, margins, timeRange]);
+
+  // Touch support for mobile - single finger moves indicator, two fingers for pinch zoom and pan
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || data.length === 0) return;
+
+    if (e.touches.length === 2) {
+      // Two-finger gesture start (pinch or pan)
+      isPinchingRef.current = true;
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      lastTouchRef.current = { x: centerX, distance, timestamp: Date.now() };
+      setHoveredPoint(null);
+      setHoverLineX(null);
+    } else if (e.touches.length === 1) {
+      // Single touch - moves the vertical indicator
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      lastTouchRef.current = { x: touch.clientX - rect.left, distance: 0, timestamp: Date.now() };
+      updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
+    }
+  }, [data, width, margins, timeRange, updateIndicatorFromTouch]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || data.length === 0 || !lastTouchRef.current) return;
+
+    const chartWidth = width - margins.left - margins.right;
+    const currentRange = viewRange
+      ? { min: viewRange.start, max: viewRange.end }
+      : fullTimeRange;
+    const timeSpan = currentRange.max - currentRange.min;
+
+    if (e.touches.length === 2 && isPinchingRef.current) {
+      // Two-finger gesture: pinch to zoom + pan
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const rect = canvas.getBoundingClientRect();
+      const relativeCenterX = centerX - rect.left - margins.left;
+      const centerRatio = Math.max(0, Math.min(1, relativeCenterX / chartWidth));
+
+      // Calculate zoom
+      const scale = lastTouchRef.current.distance / newDistance;
+      const newTimeSpan = Math.max(
+        24 * 60 * 60 * 1000, // Min 1 day
+        Math.min(fullTimeRange.max - fullTimeRange.min, timeSpan * scale)
+      );
+
+      // Calculate pan
+      const deltaX = lastTouchRef.current.x - centerX;
+      const deltaTime = (deltaX / chartWidth) * timeSpan;
+
+      // Apply zoom centered on pinch point
+      const centerTimestamp = currentRange.min + centerRatio * timeSpan;
+      let newStart = centerTimestamp - centerRatio * newTimeSpan + deltaTime;
+      let newEnd = centerTimestamp + (1 - centerRatio) * newTimeSpan + deltaTime;
+
+      // Clamp to full range
+      if (newStart < fullTimeRange.min) {
+        newStart = fullTimeRange.min;
+        newEnd = newStart + newTimeSpan;
+      }
+      if (newEnd > fullTimeRange.max) {
+        newEnd = fullTimeRange.max;
+        newStart = newEnd - newTimeSpan;
+      }
+
+      setViewRange({ start: Math.max(fullTimeRange.min, newStart), end: Math.min(fullTimeRange.max, newEnd) });
+      lastTouchRef.current = { x: centerX, distance: newDistance, timestamp: Date.now() };
+      setHoveredPoint(null);
+      setHoverLineX(null);
+    } else if (e.touches.length === 1 && !isPinchingRef.current) {
+      // Single finger: move the indicator
+      e.preventDefault();
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      updateIndicatorFromTouch(touch.clientX, touch.clientY, rect);
+      lastTouchRef.current = { x: touch.clientX - rect.left, distance: 0, timestamp: Date.now() };
+    }
+  }, [data, width, margins, viewRange, fullTimeRange, updateIndicatorFromTouch]);
+
+  const handleTouchEnd = useCallback(() => {
+    isPinchingRef.current = false;
+    // Keep tooltip visible for a moment on touch end
+    setTimeout(() => {
+      setHoveredPoint(null);
+      setHoverLineX(null);
+    }, 2000);
+  }, []);
+
   const handleCanvasMouseLeave = useCallback(() => {
     setHoveredPoint(null);
     setHoverLineX(null);
@@ -776,12 +923,25 @@ export function WebGLLineChart({
         ref={canvasRef}
         width={width * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
         height={height * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
-        className="absolute inset-0"
+        className="absolute inset-0 touch-none"
         style={{ width, height, cursor: onTimeRangeSelect ? 'crosshair' : 'default' }}
         onMouseMove={handleCanvasMouseMove}
         onMouseLeave={handleCanvasMouseLeave}
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       />
+
+      {/* Reset zoom button (shown when zoomed) */}
+      {viewRange && (
+        <button
+          onClick={() => setViewRange(null)}
+          className="absolute top-2 right-2 px-2 py-1 text-xs bg-background/80 border border-border rounded shadow-sm hover:bg-accent"
+        >
+          Reset Zoom
+        </button>
+      )}
 
       {/* Drag selection overlay */}
       {isDragging && dragStartX !== null && dragEndX !== null && (

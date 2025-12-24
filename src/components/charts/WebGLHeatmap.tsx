@@ -372,6 +372,35 @@ export function WebGLHeatmap({ cells, monthLabels, width, height }: WebGLHeatmap
     setHoveredCell(null);
   }, []);
 
+  // Touch support for mobile
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    const cellX = Math.floor((x - MARGIN_LEFT) / (cellSize + cellGap));
+    const cellY = Math.floor((y - MARGIN_TOP) / (cellSize + cellGap));
+
+    if (cellX >= 0 && cellX < weekCount && cellY >= 0 && cellY < 7) {
+      const weekKeys = Object.keys(weeks).sort((a, b) => Number(a) - Number(b));
+      if (cellX < weekKeys.length) {
+        const weekCells = weeks[Number(weekKeys[cellX])];
+        const cell = weekCells?.find(c => c.dayOfWeek === cellY);
+        if (cell) {
+          setHoveredCell(cell);
+          setMousePosition({ x: touch.clientX, y: touch.clientY - 10 });
+          return;
+        }
+      }
+    }
+    setHoveredCell(null);
+  }, [weeks, weekCount, cellSize, cellGap]);
+
+  const handleTouchEnd = useCallback(() => {
+    setTimeout(() => setHoveredCell(null), 2000);
+  }, []);
+
   const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   return (
@@ -413,10 +442,12 @@ export function WebGLHeatmap({ cells, monthLabels, width, height }: WebGLHeatmap
 
       {/* WebGL Canvas */}
       <div
-        className="absolute"
+        className="absolute touch-pan-x"
         style={{ left: 0, top: 0, width, height }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
         <canvas
           ref={canvasRef}

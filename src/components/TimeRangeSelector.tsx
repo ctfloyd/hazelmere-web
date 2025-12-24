@@ -1,10 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Calendar, ChevronDown } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
 import { DayPicker, type DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
 import 'react-day-picker/style.css';
+
+// Hook to detect mobile screens
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  return isMobile;
+}
 
 export interface TimeRange {
   startTime: Date;
@@ -52,6 +65,7 @@ export function TimeRangeSelector({ selectedRange, onRangeChange }: TimeRangeSel
     from: selectedRange.startTime,
     to: selectedRange.endTime
   });
+  const isMobile = useIsMobile();
 
   const handlePresetClick = (range: TimeRange) => {
     onRangeChange(range);
@@ -91,22 +105,21 @@ export function TimeRangeSelector({ selectedRange, onRangeChange }: TimeRangeSel
   const isPresetSelected = PRESET_RANGES.some(r => r.label === selectedRange.label);
 
   return (
-    <Card className="relative">
-      <CardContent className="p-3">
-        <Button
-          variant="outline"
-          onClick={() => setIsOpen(!isOpen)}
-          className="w-full justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
-            <span className="truncate max-w-[200px]">{selectedRange.label}</span>
-          </div>
-          <ChevronDown className="h-4 w-4 flex-shrink-0" />
-        </Button>
+    <div className="relative">
+      <Button
+        variant="outline"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full justify-between h-9 px-2 sm:px-3"
+      >
+        <div className="flex items-center gap-1 min-w-0">
+          <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+          <span className="truncate text-xs sm:text-sm">{selectedRange.label}</span>
+        </div>
+        <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+      </Button>
 
-        {isOpen && (
-          <div className="absolute top-full left-0 z-10 mt-1 bg-background border border-border rounded-lg shadow-lg">
+      {isOpen && (
+        <div className="absolute top-full left-0 right-0 sm:right-auto z-10 mt-1 bg-background border border-border rounded-lg shadow-lg max-h-[80vh] overflow-auto">
             {!showCalendar ? (
               <div className="p-2 space-y-1">
                 {PRESET_RANGES.map((range, index) => (
@@ -142,17 +155,20 @@ export function TimeRangeSelector({ selectedRange, onRangeChange }: TimeRangeSel
                 </div>
                 <style>{`
                   .rdp {
-                    --rdp-cell-size: 36px;
+                    --rdp-cell-size: ${isMobile ? '32px' : '36px'};
                     --rdp-accent-color: hsl(var(--primary));
                     --rdp-background-color: hsl(var(--accent));
                     --rdp-accent-background-color: hsl(var(--accent));
                     --rdp-outline: 2px solid hsl(var(--primary));
                     --rdp-outline-selected: 2px solid hsl(var(--primary));
                     margin: 0;
+                    font-size: ${isMobile ? '0.875rem' : '1rem'};
                   }
                   .rdp-months {
                     display: flex;
                     gap: 1rem;
+                    flex-wrap: wrap;
+                    justify-content: center;
                   }
                   .rdp-month {
                     background: transparent;
@@ -179,7 +195,7 @@ export function TimeRangeSelector({ selectedRange, onRangeChange }: TimeRangeSel
                   mode="range"
                   selected={dateRange}
                   onSelect={setDateRange}
-                  numberOfMonths={2}
+                  numberOfMonths={isMobile ? 1 : 2}
                   disabled={{ before: new Date('2021-10-19'), after: new Date() }}
                 />
                 <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
@@ -195,10 +211,9 @@ export function TimeRangeSelector({ selectedRange, onRangeChange }: TimeRangeSel
                   </Button>
                 </div>
               </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -7,7 +7,7 @@ import { WebGLLineChart } from '@/components/charts/WebGLLineChart';
 
 interface GainsChartProps {
   deltaResponse: GetSnapshotWithDeltasResponse;
-  selectedActivity?: ActivityType | null;
+  selectedActivity?: ActivityType;
   chartType?: 'cumulative' | 'daily';
   onTimeRangeSelect?: (startTime: Date, endTime: Date) => void;
 }
@@ -26,8 +26,8 @@ interface ChartDataPoint {
   skillBreakdown?: SkillGain[];
 }
 
-function extractActivityData(snapshot: HiscoreSnapshot, activityType?: ActivityType | null) {
-  if (!activityType) {
+function extractActivityData(snapshot: HiscoreSnapshot, activityType?: ActivityType) {
+  if (!activityType || activityType === 'OVERALL') {
     // Total XP: use OVERALL skill (matches what deltas use)
     const overall = snapshot.skills.find(s => s.activityType === 'OVERALL');
     return {
@@ -63,7 +63,7 @@ function extractActivityData(snapshot: HiscoreSnapshot, activityType?: ActivityT
 // The snapshot is the STARTING point, and deltas are added to show progression
 function generateChartDataFromDeltas(
   deltaResponse: GetSnapshotWithDeltasResponse,
-  activityType?: ActivityType | null
+  activityType?: ActivityType
 ): ChartDataPoint[] {
   const { snapshot: baseSnapshot, deltas } = deltaResponse;
 
@@ -327,8 +327,8 @@ export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumul
 
   // Generate overall XP data for anomaly detection (used even when specific activity is selected)
   const overallChartData = useMemo(() => {
-    if (!selectedActivity) return chartData;
-    return generateChartDataFromDeltas(deltaResponse, null);
+    if (selectedActivity === 'OVERALL') return chartData;
+    return generateChartDataFromDeltas(deltaResponse, 'OVERALL');
   }, [deltaResponse, selectedActivity, chartData]);
 
   // Detect anomalies based on overall XP data
@@ -419,10 +419,10 @@ export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumul
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">
+        <h3 className="text-base sm:text-lg font-semibold">
           {chartType === 'cumulative' ? 'Progress Over Time' : 'Daily Gains'}
           {selectedActivity && (
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
+            <span className="ml-1 sm:ml-2 text-xs sm:text-sm font-normal text-muted-foreground">
               ({formatActivityTypeName(selectedActivity)})
             </span>
           )}
@@ -431,7 +431,7 @@ export function GainsChart({ deltaResponse, selectedActivity, chartType = 'cumul
 
       <div
         ref={containerRef}
-        className="h-80 relative"
+        className="h-64 sm:h-80 relative overflow-hidden w-full"
       >
         {chartType === 'cumulative' ? (
           /* WebGL-accelerated line chart for cumulative progress */

@@ -14,7 +14,6 @@ import { useSnapshotWithDeltas, useApiHealth } from '@/hooks/useApi';
 import type { ActivityType } from '@/types/api';
 import {
   formatNumber,
-  formatActivityTypeName,
   calculateGainsFromDeltas,
   getActivityGainFromDeltas
 } from '@/lib/dataUtils';
@@ -49,8 +48,8 @@ export function GainsTracker() {
 
   const [userId, setUserId] = useState<string | null>(() => searchParams.get('player'));
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getInitialTimeRange(searchParams));
-  const [selectedActivity, setSelectedActivity] = useState<ActivityType | null>(
-    () => (searchParams.get('activity') as ActivityType) || null
+  const [selectedActivity, setSelectedActivity] = useState<ActivityType>(
+    () => (searchParams.get('activity') as ActivityType) || 'OVERALL'
   );
   const [chartType, setChartType] = useState<'cumulative' | 'daily'>(
     () => (searchParams.get('chart') === 'daily' ? 'daily' : 'cumulative')
@@ -88,7 +87,7 @@ export function GainsTracker() {
       return { totalGain: 0, levelGain: 0 };
     }
 
-    if (!selectedActivity) {
+    if (selectedActivity === 'OVERALL') {
       // Get total XP gain from OVERALL skill in deltas
       const gainsSummary = calculateGainsFromDeltas(deltaResponse.deltas);
       return { totalGain: gainsSummary.totalExperienceGain, levelGain: 0 };
@@ -109,13 +108,14 @@ export function GainsTracker() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header - hidden on mobile since title is in navbar */}
+      <div className="hidden sm:block">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Gains Tracker</h1>
             <p className="text-muted-foreground mt-2">
-              Track your RuneScape progress over time with detailed analytics
+              Track your RuneScape progress over time
             </p>
           </div>
           <TooltipProvider>
@@ -154,115 +154,101 @@ export function GainsTracker() {
         <ErrorAlert error={error} onRetry={refetch} title="Failed to load gains data" />
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <TimeRangeSelector 
-          selectedRange={timeRange} 
-          onRangeChange={setTimeRange} 
-        />
-        
-        <ActivitySelector
-          selectedActivity={selectedActivity}
-          onActivityChange={setSelectedActivity}
-        />
+      <div className="flex gap-2 sm:gap-4">
+        <div className="flex-1">
+          <TimeRangeSelector
+            selectedRange={timeRange}
+            onRangeChange={setTimeRange}
+          />
+        </div>
 
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant={chartType === 'cumulative' ? 'default' : 'outline'}
-                onClick={() => setChartType('cumulative')}
-                className="flex-1"
-              >
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Cumulative
-              </Button>
-              <Button
-                size="sm"
-                variant={chartType === 'daily' ? 'default' : 'outline'}
-                onClick={() => setChartType('daily')}
-                className="flex-1"
-              >
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Daily Gains
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="flex-1">
+          <ActivitySelector
+            selectedActivity={selectedActivity}
+            onActivityChange={setSelectedActivity}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-1 sm:gap-2">
+        <Button
+          size="sm"
+          variant={chartType === 'cumulative' ? 'default' : 'outline'}
+          onClick={() => setChartType('cumulative')}
+          className="flex-1 px-2 sm:px-3 h-9"
+        >
+          <TrendingUp className="h-4 w-4 mr-1 sm:mr-2" />
+          <span className="text-xs sm:text-sm">Cumulative</span>
+        </Button>
+        <Button
+          size="sm"
+          variant={chartType === 'daily' ? 'default' : 'outline'}
+          onClick={() => setChartType('daily')}
+          className="flex-1 px-2 sm:px-3 h-9"
+        >
+          <BarChart3 className="h-4 w-4 mr-1 sm:mr-2" />
+          <span className="text-xs sm:text-sm">Daily Gains</span>
+        </Button>
       </div>
 
       {/* Summary Stats */}
       {deltaResponse && totalDeltas > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-2 sm:gap-4 grid-cols-3 sm:grid-cols-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {selectedActivity ? 'Activity Gain' : 'Total XP Gained'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="p-2 sm:p-4">
+              <p className="text-[10px] sm:text-sm font-medium text-muted-foreground truncate">
+                {selectedActivity !== 'OVERALL' ? 'Gain' : 'XP Gained'}
+              </p>
               {loading ? (
-                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-5 sm:h-8 w-12 sm:w-20 mt-1" />
               ) : (
-                <div className="text-2xl font-bold text-green-600">
+                <div className="text-sm sm:text-2xl font-bold text-green-600 truncate">
                   +{formatNumber(totalGain)}
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                {timeRange.label.toLowerCase()}
-              </p>
             </CardContent>
           </Card>
 
-          {selectedActivity && levelGain > 0 && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Levels Gained</CardTitle>
-              </CardHeader>
-              <CardContent>
+          {selectedActivity !== 'OVERALL' && levelGain > 0 && (
+            <Card className="hidden sm:block">
+              <CardContent className="p-2 sm:p-4">
+                <p className="text-[10px] sm:text-sm font-medium text-muted-foreground truncate">
+                  Levels
+                </p>
                 {loading ? (
-                  <Skeleton className="h-8 w-20" />
+                  <Skeleton className="h-5 sm:h-8 w-12 sm:w-20 mt-1" />
                 ) : (
-                  <div className="text-2xl font-bold text-blue-600">
+                  <div className="text-sm sm:text-2xl font-bold text-blue-600">
                     +{levelGain}
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  {formatActivityTypeName(selectedActivity)}
-                </p>
               </CardContent>
             </Card>
           )}
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Changes Tracked</CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="p-2 sm:p-4">
+              <p className="text-[10px] sm:text-sm font-medium text-muted-foreground truncate">
+                Changes
+              </p>
               {loading ? (
-                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-5 sm:h-8 w-12 sm:w-20 mt-1" />
               ) : (
-                <div className="text-2xl font-bold">
+                <div className="text-sm sm:text-2xl font-bold">
                   {totalDeltas}
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                snapshots with gains
-              </p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Time Period</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
+            <CardContent className="p-2 sm:p-4">
+              <p className="text-[10px] sm:text-sm font-medium text-muted-foreground truncate">
+                Days
+              </p>
+              <div className="text-sm sm:text-2xl font-bold">
                 {Math.ceil((timeRange.endTime.getTime() - timeRange.startTime.getTime()) / (1000 * 60 * 60 * 24))}
               </div>
-              <p className="text-xs text-muted-foreground">
-                days tracked
-              </p>
             </CardContent>
           </Card>
         </div>
@@ -270,14 +256,14 @@ export function GainsTracker() {
 
       {/* Charts and Heatmap */}
       {deltaResponse && totalDeltas > 0 && (
-        <div className="grid gap-6 lg:grid-cols-1">
+        <div className="grid gap-4 sm:gap-6 lg:grid-cols-1">
           <Card>
-            <CardHeader>
-              <CardTitle>Progress Visualization</CardTitle>
+            <CardHeader className="hidden sm:block pb-2 sm:pb-6">
+              <CardTitle className="text-base sm:text-lg">Progress Visualization</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-2 sm:p-6 overflow-hidden">
               {loading ? (
-                <div className="h-80 flex items-center justify-center">
+                <div className="h-64 sm:h-80 flex items-center justify-center">
                   <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
                 </div>
               ) : (
@@ -292,10 +278,10 @@ export function GainsTracker() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Experience Heatmap - {timeRange.label}</CardTitle>
+            <CardHeader className="hidden sm:block pb-2 sm:pb-6">
+              <CardTitle className="text-base sm:text-lg">Experience Heatmap - {timeRange.label}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-2 sm:p-6 overflow-hidden">
               <DailyHeatmap
                 userId={userId}
                 timeRange={timeRange}
