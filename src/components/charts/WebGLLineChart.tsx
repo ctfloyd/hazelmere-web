@@ -861,7 +861,7 @@ export function WebGLLineChart({
   }
 
   return (
-    <div className="relative w-full" style={{ maxWidth: width, height }}>
+    <div className="relative w-full h-full" style={{ height }}>
       {/* Y-axis labels */}
       <div className="absolute pointer-events-none" style={{ left: 0, top: 0, width: margins.left - 5 }}>
         {yAxisTicks.map((tick, i) => (
@@ -917,20 +917,37 @@ export function WebGLLineChart({
         ))}
       </svg>
 
-      {/* WebGL Canvas */}
-      <canvas
-        ref={canvasRef}
-        width={width * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
-        height={height * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
-        className="absolute inset-0"
-        style={{ width: '100%', height: '100%', maxWidth: width, cursor: onTimeRangeSelect ? 'crosshair' : 'default', touchAction: 'pan-y pinch-zoom' }}
-        onMouseMove={handleCanvasMouseMove}
-        onMouseLeave={handleCanvasMouseLeave}
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      />
+      {/* WebGL Canvas - clipped to chart area */}
+      <div
+        className="absolute overflow-hidden"
+        style={{
+          left: margins.left,
+          top: margins.top,
+          right: margins.right,
+          bottom: margins.bottom
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          width={width * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
+          height={height * (typeof window !== 'undefined' ? window.devicePixelRatio : 1)}
+          className="absolute"
+          style={{
+            left: -margins.left,
+            top: -margins.top,
+            width,
+            height,
+            cursor: onTimeRangeSelect ? 'crosshair' : 'default',
+            touchAction: 'pan-y'
+          }}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseLeave={handleCanvasMouseLeave}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        />
+      </div>
 
       {/* Reset zoom button (shown when zoomed) */}
       {viewRange && (
